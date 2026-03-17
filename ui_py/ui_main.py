@@ -38,6 +38,10 @@ class Ui_MainWindow(object):
         self.page_tasks.setObjectName("page_tasks")
         self.pagesStack.addWidget(self.page_tasks)
 
+        self.page_notes = QtWidgets.QWidget()
+        self.page_notes.setObjectName("page_notes")
+        self.pagesStack.addWidget(self.page_notes)
+
         MainWindow.setCentralWidget(self.centralwidget)
 
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
