@@ -7,10 +7,76 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QMessageBox, QWidget,
                              QVBoxLayout, QHBoxLayout, QListWidget, QLabel,
                              QLineEdit, QPushButton, QTextEdit, QCalendarWidget,
-                             QComboBox, QFileDialog, QInputDialog, QFrame)
+                             QComboBox, QFileDialog, QInputDialog, QFrame, QDialog, QDialogButtonBox, QFormLayout)
 from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QTextCharFormat, QColor, QBrush, QFont, QTextCursor, QTextBlockFormat
 from ui_py.ui_main import Ui_MainWindow
+
+
+# --- Диалог для добавления/редактирования задачи ---
+class TaskDialog(QDialog):
+    def __init__(self, parent=None, subjects=None, task_data=None):
+        super().__init__(parent)
+        self.setWindowTitle("Задача")
+        self.resize(300, 200)
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.input_title = QLineEdit()
+        self.input_date = QLineEdit()
+        self.input_date.setPlaceholderText("ГГГГ-ММ-ДД")
+        self.combo_subject = QComboBox()
+        self.input_desc = QLineEdit()
+
+        # Заполняем предметы
+        self.subjects_map = {}  # map name -> id
+        if subjects:
+            for sub in subjects:
+                self.combo_subject.addItem(sub[1], sub[0])  # text, data
+                self.subjects_map[sub[1]] = sub[0]
+
+        self.combo_subject.addItem("Без предмета", None)  # Опция "без привязки"
+
+        form_layout.addRow("Название:", self.input_title)
+        form_layout.addRow("Срок:", self.input_date)
+        form_layout.addRow("Предмет:", self.combo_subject)
+        form_layout.addRow("Описание:", self.input_desc)
+
+        layout.addLayout(form_layout)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        # Если редактируем - заполняем данными
+        if task_data:
+            # task_data = (id, title, due_date, subject_name)
+            self.input_title.setText(task_data[1])
+            self.input_date.setText(task_data[2] if task_data[2] else "")
+            self.input_desc.setText(
+                task_data[4] if len(task_data) > 4 else "")  # desc is not in get_all_tasks list, but we can pass it
+
+            # Ищем индекс предмета
+            if task_data[3]:  # subject_name
+                index = self.combo_subject.findText(task_data[3])
+                if index >= 0:
+                    self.combo_subject.setCurrentIndex(index)
+            else:
+                self.combo_subject.setCurrentText("Без предмета")
+
+    def get_data(self):
+        subject_id = self.combo_subject.currentData()
+        return {
+            'title': self.input_title.text(),
+            'due_date': self.input_date.text(),
+            'subject_id': subject_id,
+            'description': self.input_desc.text()
+        }
+
+
+# --- Основное окно ---
 
 STYLES = {
     "light": """
@@ -21,6 +87,8 @@ STYLES = {
         QPushButton { background-color: #007bff; color: white; border-radius: 6px; padding: 10px; font-weight: bold; border: none; }
         QPushButton:hover { background-color: #0056b3; }
         QLineEdit, QTextEdit, QComboBox { background-color: white; border: 1px solid #ccc; border-radius: 6px; padding: 8px; color: #333; }
+
+        /* CALENDAR LIGHT */
         QCalendarWidget QTableView { background-color: white; color: #333; selection-background-color: #007bff; selection-color: white; }
         QCalendarWidget QToolButton { color: #333; background-color: transparent; }
         QCalendarWidget QWidget#qt_calendar_navigationbar { background-color: #e0e0e0; }
@@ -33,12 +101,60 @@ STYLES = {
         QPushButton { background-color: #3a7bd5; color: white; border-radius: 6px; padding: 10px; font-weight: bold; border: none; }
         QPushButton:hover { background-color: #5a95e5; }
         QLineEdit, QTextEdit, QComboBox { background-color: #2d2d2d; border: 1px solid #444; border-radius: 6px; padding: 8px; color: white; }
-        QCalendarWidget QTableView { background-color: #2d2d2d; color: #e0e0e0; selection-background-color: #3a7bd5; selection-color: white; gridline-color: #444; }
-        QCalendarWidget QToolButton { color: #e0e0e0; background-color: transparent; font-weight: bold; }
-        QCalendarWidget QWidget#qt_calendar_navigationbar { background-color: #252525; }
-        QCalendarWidget QSpinBox { background-color: #252525; color: white; selection-color: white; selection-background-color: #3a7bd5; border: none; padding: 2px; }
-        QCalendarWidget QSpinBox::up-button, QCalendarWidget QSpinBox::down-button { background-color: #3a3a3a; border: none; width: 10px; }
-        QCalendarWidget QSpinBox::up-button:hover, QCalendarWidget QSpinBox::down-button:hover { background-color: #4a4a4a; }
+
+        /* CALENDAR DARK - Полностью переделано */
+        QCalendarWidget { background-color: #121212; }
+        QCalendarWidget QTableView { 
+            background-color: #1e1e1e; 
+            color: #e0e0e0; 
+            selection-background-color: #3a7bd5; 
+            selection-color: white; 
+            gridline-color: #444; 
+            alternate-background-color: #252525;
+            outline: 0px;
+        }
+        QCalendarWidget QTableView::item:selected { 
+            background-color: #3a7bd5; 
+            color: white; 
+        }
+        QCalendarWidget QTableView::item:hover { 
+            background-color: #2a2a2a; 
+        }
+        QCalendarWidget QToolButton { 
+            color: #e0e0e0; 
+            background-color: #252525; 
+            border: 1px solid #444; 
+            border-radius: 4px; 
+            margin: 2px; 
+            padding: 4px;
+            font-weight: bold;
+        }
+        QCalendarWidget QToolButton:hover { 
+            background-color: #3a3a3a; 
+        }
+        QCalendarWidget QToolButton::menu-indicator { 
+            image: none; 
+        }
+        QCalendarWidget QWidget#qt_calendar_navigationbar { 
+            background-color: #252525; 
+        }
+        QCalendarWidget QSpinBox { 
+            background-color: #2d2d2d; 
+            color: white; 
+            selection-color: white; 
+            selection-background-color: #3a7bd5; 
+            border: 1px solid #444; 
+            padding: 2px;
+            border-radius: 4px;
+        }
+        QCalendarWidget QSpinBox::up-button, QCalendarWidget QSpinBox::down-button { 
+            background-color: #3a3a3a; 
+            border: none; 
+            width: 15px;
+        }
+        QCalendarWidget QSpinBox::up-button:hover, QCalendarWidget QSpinBox::down-button:hover { 
+            background-color: #4a4a4a; 
+        }
     """
 }
 
@@ -53,8 +169,10 @@ class MainWindow(QMainWindow):
         self.apply_theme(self.current_theme)
         self.storage_path = database.get_setting('path', '')
 
-        # Переменная для хранения пути к текущему открытому файлу
         self.current_note_path = None
+        # Состояние сортировки
+        self.is_subj_reverse = False
+        self.is_task_reverse = False
 
         self.setup_subjects_ui()
         self.setup_settings_ui()
@@ -71,11 +189,11 @@ class MainWindow(QMainWindow):
         app.setStyleSheet(STYLES.get(theme_name, STYLES["light"]))
 
     def setup_menu_logic(self):
-        self.ui.menuList.addItem("Предметы")
-        self.ui.menuList.addItem("Календарь")
-        self.ui.menuList.addItem("Настройки")
-        self.ui.menuList.addItem("Задания")
-        self.ui.menuList.addItem("Блокнот")
+        self.ui.menuList.addItem("  📚 Предметы")
+        self.ui.menuList.addItem("  📅 Календарь")
+        self.ui.menuList.addItem("  ⚙️ Настройки")
+        self.ui.menuList.addItem("  📝 Задания")
+        self.ui.menuList.addItem("  📓 Блокнот")
         self.ui.menuList.currentRowChanged.connect(self.change_page)
 
     def change_page(self, index):
@@ -102,6 +220,25 @@ class MainWindow(QMainWindow):
         layout.setSpacing(20)
         left_layout = QVBoxLayout()
         left_layout.addWidget(QLabel("<h2>Мои предметы</h2>"))
+
+        sort_layout = QHBoxLayout()
+        sort_layout.addWidget(QLabel("Сортировка:"))
+        self.combo_subj_sort = QComboBox()
+        self.combo_subj_sort.addItem("По названию", "name")
+        self.combo_subj_sort.addItem("По преподавателю", "teacher")
+        self.combo_subj_sort.addItem("По кабинету", "room")
+        self.combo_subj_sort.currentTextChanged.connect(self.load_subjects)
+        sort_layout.addWidget(self.combo_subj_sort)
+
+        self.btn_subj_reverse = QPushButton("⇅")
+        self.btn_subj_reverse.setFixedWidth(30)
+        self.btn_subj_reverse.setToolTip("Изменить порядок")
+        self.btn_subj_reverse.clicked.connect(self.toggle_subject_sort)
+        sort_layout.addWidget(self.btn_subj_reverse)
+
+        sort_layout.addStretch()
+        left_layout.addLayout(sort_layout)
+
         self.subjects_list = QListWidget()
         self.subjects_list.itemClicked.connect(self.show_subject_details)
         left_layout.addWidget(self.subjects_list)
@@ -138,9 +275,16 @@ class MainWindow(QMainWindow):
         layout.addLayout(left_layout, 30)
         layout.addLayout(right_layout, 70)
 
+    def toggle_subject_sort(self):
+        self.is_subj_reverse = not self.is_subj_reverse
+        self.load_subjects()
+
     def load_subjects(self):
         self.subjects_list.clear()
-        data = database.get_all_subjects()
+        sort_mode = self.combo_subj_sort.currentData()
+        if not sort_mode: sort_mode = 'name'
+
+        data = database.get_all_subjects(sort_by=sort_mode, reverse=self.is_subj_reverse)
         for row in data:
             self.subjects_list.addItem(f"{row[1]} (каб. {row[3]})")
             self.subjects_list.item(self.subjects_list.count() - 1).setData(Qt.ItemDataRole.UserRole, row[0])
@@ -271,6 +415,25 @@ class MainWindow(QMainWindow):
         layout.setSpacing(20)
         left_layout = QVBoxLayout()
         left_layout.addWidget(QLabel("<h2>Список заданий</h2>"))
+
+        task_sort_layout = QHBoxLayout()
+        task_sort_layout.addWidget(QLabel("Сортировка:"))
+        self.combo_task_sort = QComboBox()
+        self.combo_task_sort.addItem("По дедлайну", "due_date")
+        self.combo_task_sort.addItem("По предмету", "subject")
+        self.combo_task_sort.addItem("По названию", "title")
+        self.combo_task_sort.currentTextChanged.connect(self.load_tasks)
+        task_sort_layout.addWidget(self.combo_task_sort)
+
+        self.btn_task_reverse = QPushButton("⇅")
+        self.btn_task_reverse.setFixedWidth(30)
+        self.btn_task_reverse.setToolTip("Изменить порядок")
+        self.btn_task_reverse.clicked.connect(self.toggle_task_sort)
+        task_sort_layout.addWidget(self.btn_task_reverse)
+
+        task_sort_layout.addStretch()
+        left_layout.addLayout(task_sort_layout)
+
         self.tasks_list = QListWidget()
         self.tasks_list.itemClicked.connect(self.show_task_details)
         left_layout.addWidget(self.tasks_list)
@@ -291,8 +454,10 @@ class MainWindow(QMainWindow):
         info_frame.setFrameShape(QFrame.Shape.StyledPanel)
         info_layout = QVBoxLayout(info_frame)
         self.task_title = QLabel("Название: -")
+        self.task_subject = QLabel("Предмет: -")
         self.task_date = QLabel("Срок: -")
         info_layout.addWidget(self.task_title)
+        info_layout.addWidget(self.task_subject)
         info_layout.addWidget(self.task_date)
         info_layout.addSpacing(10)
         info_layout.addWidget(QLabel("<b>Описание:</b>"))
@@ -305,44 +470,102 @@ class MainWindow(QMainWindow):
         layout.addLayout(left_layout, 30)
         layout.addLayout(right_layout, 70)
 
+    def toggle_task_sort(self):
+        self.is_task_reverse = not self.is_task_reverse
+        self.load_tasks()
+
     def load_tasks(self):
         self.tasks_list.clear()
-        data = database.get_all_tasks()
+        sort_mode = self.combo_task_sort.currentData()
+        if not sort_mode: sort_mode = 'due_date'
+
+        data = database.get_all_tasks(sort_by=sort_mode, reverse=self.is_task_reverse)
+        # data structure: (id, title, due_date, subject_name)
         for row in data:
+            subject_name = row[3] if row[3] else "Без предмета"
             date_str = row[2] if row[2] else "Без даты"
-            self.tasks_list.addItem(f"{row[1]} ({date_str})")
+            self.tasks_list.addItem(f"[{subject_name}] {row[1]} ({date_str})")
             self.tasks_list.item(self.tasks_list.count() - 1).setData(Qt.ItemDataRole.UserRole, row[0])
 
     def show_task_details(self, item):
         tid = item.data(Qt.ItemDataRole.UserRole)
         data = database.get_task_details(tid)
         if data:
+            # data = (id, title, description, due_date, subject_id)
             self.task_title.setText(f"<b>Название:</b> {data[1]}")
             self.task_date.setText(f"<b>Срок:</b> {data[3] if data[3] else 'Не указан'}")
+
+            sub_id = data[4]
+            if sub_id:
+                sub_details = database.get_subject_details(sub_id)
+                sub_name = sub_details[1] if sub_details else "Неизвестен"
+                self.task_subject.setText(f"<b>Предмет:</b> {sub_name}")
+            else:
+                self.task_subject.setText("<b>Предмет:</b> -")
+
             self.task_desc.setText(data[2] if data[2] else "Нет описания")
 
     def add_task(self):
-        title, ok = QInputDialog.getText(self, "Новое задание", "Название:")
-        if ok and title:
-            date, ok1 = QInputDialog.getText(self, "Новое задание", "Срок (ГГГГ-ММ-ДД):", text="")
-            desc, ok2 = QInputDialog.getText(self, "Новое задание", "Описание:", text="")
-            database.add_task(title, desc or "", date or "")
+        subjects = database.get_all_subjects()
+        dlg = TaskDialog(self, subjects)
+        if dlg.exec():
+            data = dlg.get_data()
+            database.add_task(data['title'], data['description'], data['due_date'], data['subject_id'])
             self.load_tasks()
             self.update_calendar_deadlines()
 
     def edit_task(self):
         item = self.tasks_list.currentItem()
         if not item: return
-        tid = item.data(Qt.ItemDataRole.UserRole)
-        data = database.get_task_details(tid)
-        title, ok = QInputDialog.getText(self, "Ред. задание", "Название:", text=data[1])
-        if ok:
-            date, ok1 = QInputDialog.getText(self, "Ред. задание", "Срок (ГГГГ-ММ-ДД):", text=data[3] or "")
-            desc, ok2 = QInputDialog.getText(self, "Ред. задание", "Описание:", text=data[2] or "")
-            database.update_task(tid, title, desc or "", date or "")
-            self.load_tasks()
-            self.show_task_details(item)
-            self.update_calendar_deadlines()
+
+        try:
+            tid = item.data(Qt.ItemDataRole.UserRole)
+            data = database.get_task_details(tid)  # (id, title, desc, due_date, subject_id)
+
+            if not data:
+                QMessageBox.warning(self, "Ошибка", "Задача не найдена в базе.")
+                return
+
+            # Нам нужно полное имя предмета для диалога
+            subject_name = None
+            sub_id = data[4]
+
+            if sub_id:
+                try:
+                    sub = database.get_subject_details(sub_id)
+                    if sub:
+                        subject_name = sub[1]
+                except:
+                    subject_name = None
+
+            # Формируем данные для диалога
+            # (id, title, due_date, subject_name, description)
+            task_data_for_dialog = (data[0], data[1], data[3], subject_name, data[2])
+
+            subjects = database.get_all_subjects()
+            dlg = TaskDialog(self, subjects, task_data_for_dialog)
+
+            if dlg.exec():
+                new_data = dlg.get_data()
+
+                # Обновляем в БД
+                database.update_task(tid, new_data['title'], new_data['description'], new_data['due_date'],
+                                     new_data['subject_id'])
+
+                # Перезагружаем список
+                self.load_tasks()
+
+                # Обновляем детали на экране (пытаемся найти тот же item по индексу)
+                current_row = self.tasks_list.row(item)
+                new_item = self.tasks_list.item(current_row)
+                if new_item:
+                    self.show_task_details(new_item)
+
+                self.update_calendar_deadlines()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка редактирования", f"Произошла ошибка при сохранении:\n{str(e)}")
+            print(f"Error: {e}")  # Для отладки в консоли
 
     def delete_task(self):
         item = self.tasks_list.currentItem()
@@ -352,6 +575,7 @@ class MainWindow(QMainWindow):
             database.delete_task(item.data(Qt.ItemDataRole.UserRole))
             self.load_tasks()
             self.task_title.setText("Название: -")
+            self.task_subject.setText("Предмет: -")
             self.task_date.setText("Срок: -")
             self.task_desc.setText("-")
             self.update_calendar_deadlines()
@@ -361,7 +585,6 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Путь к файлу
         self.lbl_current_file = QLabel("<b>Новый файл</b>")
         self.lbl_current_file.setStyleSheet("font-size: 12px; padding: 5px; color: gray;")
         layout.addWidget(self.lbl_current_file)
@@ -369,15 +592,15 @@ class MainWindow(QMainWindow):
         toolbar_layout = QHBoxLayout()
         toolbar_layout.setContentsMargins(5, 5, 5, 5)
 
-        self.btn_open = QPushButton("Открыть")
+        self.btn_open = QPushButton("📂 Открыть")
         self.btn_open.clicked.connect(self.open_file)
         toolbar_layout.addWidget(self.btn_open)
 
-        self.btn_save = QPushButton("Сохранить")
+        self.btn_save = QPushButton("💾 Сохранить")
         self.btn_save.clicked.connect(self.save_file)
         toolbar_layout.addWidget(self.btn_save)
 
-        self.btn_save_as = QPushButton("Сохранить как...")
+        self.btn_save_as = QPushButton("📤 Сохранить как...")
         self.btn_save_as.clicked.connect(self.save_file_as)
         toolbar_layout.addWidget(self.btn_save_as)
 
@@ -415,7 +638,7 @@ class MainWindow(QMainWindow):
 
     def update_note_path_label(self):
         if self.current_note_path:
-            self.lbl_current_file.setText(f"{self.current_note_path}")
+            self.lbl_current_file.setText(f"📄 {self.current_note_path}")
         else:
             self.lbl_current_file.setText("<b>Новый файл</b> (не сохранен)")
 
