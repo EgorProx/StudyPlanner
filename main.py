@@ -189,11 +189,11 @@ class MainWindow(QMainWindow):
         app.setStyleSheet(STYLES.get(theme_name, STYLES["light"]))
 
     def setup_menu_logic(self):
-        self.ui.menuList.addItem("  📚 Предметы")
-        self.ui.menuList.addItem("  📅 Календарь")
-        self.ui.menuList.addItem("  ⚙️ Настройки")
-        self.ui.menuList.addItem("  📝 Задания")
-        self.ui.menuList.addItem("  📓 Блокнот")
+        self.ui.menuList.addItem("Предметы")
+        self.ui.menuList.addItem("Календарь")
+        self.ui.menuList.addItem("Настройки")
+        self.ui.menuList.addItem("Задания")
+        self.ui.menuList.addItem("Блокнот")
         self.ui.menuList.currentRowChanged.connect(self.change_page)
 
     def change_page(self, index):
@@ -416,6 +416,18 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout()
         left_layout.addWidget(QLabel("<h2>Список заданий</h2>"))
 
+        # Фильтр статуса задач
+        status_layout = QHBoxLayout()
+        status_layout.addWidget(QLabel("Показать:"))
+        self.combo_task_status = QComboBox()
+        self.combo_task_status.addItem("Активные", "active")
+        self.combo_task_status.addItem("Архив", "archived")
+        self.combo_task_status.addItem("Все", "all")
+        self.combo_task_status.currentTextChanged.connect(self.load_tasks)
+        status_layout.addWidget(self.combo_task_status)
+        status_layout.addStretch()
+        left_layout.addLayout(status_layout)
+
         task_sort_layout = QHBoxLayout()
         task_sort_layout.addWidget(QLabel("Сортировка:"))
         self.combo_task_sort = QComboBox()
@@ -441,12 +453,16 @@ class MainWindow(QMainWindow):
         self.btn_add_task = QPushButton("Добавить")
         self.btn_edit_task = QPushButton("Ред.")
         self.btn_del_task = QPushButton("Удалить")
+        self.btn_archive_task = QPushButton("Архив")
+        self.btn_archive_task.setToolTip("Архивировать/Восстановить задание")
         self.btn_add_task.clicked.connect(self.add_task)
         self.btn_edit_task.clicked.connect(self.edit_task)
         self.btn_del_task.clicked.connect(self.delete_task)
+        self.btn_archive_task.clicked.connect(self.toggle_archive_task)
         btn_layout.addWidget(self.btn_add_task)
         btn_layout.addWidget(self.btn_edit_task)
         btn_layout.addWidget(self.btn_del_task)
+        btn_layout.addWidget(self.btn_archive_task)
         left_layout.addLayout(btn_layout)
         right_layout = QVBoxLayout()
         right_layout.addWidget(QLabel("<h2>Детали задания</h2>"))
@@ -456,9 +472,11 @@ class MainWindow(QMainWindow):
         self.task_title = QLabel("Название: -")
         self.task_subject = QLabel("Предмет: -")
         self.task_date = QLabel("Срок: -")
+        self.task_status = QLabel("Статус: -")
         info_layout.addWidget(self.task_title)
         info_layout.addWidget(self.task_subject)
         info_layout.addWidget(self.task_date)
+        info_layout.addWidget(self.task_status)
         info_layout.addSpacing(10)
         info_layout.addWidget(QLabel("<b>Описание:</b>"))
         self.task_desc = QLabel("-")
@@ -479,19 +497,23 @@ class MainWindow(QMainWindow):
         sort_mode = self.combo_task_sort.currentData()
         if not sort_mode: sort_mode = 'due_date'
 
-        data = database.get_all_tasks(sort_by=sort_mode, reverse=self.is_task_reverse)
-        # data structure: (id, title, due_date, subject_name)
+        status_filter = self.combo_task_status.currentData()
+        if not status_filter: status_filter = 'active'
+
+        data = database.get_all_tasks(sort_by=sort_mode, reverse=self.is_task_reverse, status_filter=status_filter)
+        # data structure: (id, title, due_date, subject_name, status)
         for row in data:
             subject_name = row[3] if row[3] else "Без предмета"
             date_str = row[2] if row[2] else "Без даты"
-            self.tasks_list.addItem(f"[{subject_name}] {row[1]} ({date_str})")
+            status_icon = "(Архив)" if row[4] == 'archived' else "(Активное)"
+            self.tasks_list.addItem(f"{status_icon} [{subject_name}] {row[1]} ({date_str})")
             self.tasks_list.item(self.tasks_list.count() - 1).setData(Qt.ItemDataRole.UserRole, row[0])
 
     def show_task_details(self, item):
         tid = item.data(Qt.ItemDataRole.UserRole)
         data = database.get_task_details(tid)
         if data:
-            # data = (id, title, description, due_date, subject_id)
+            # data = (id, title, description, due_date, subject_id, status)
             self.task_title.setText(f"<b>Название:</b> {data[1]}")
             self.task_date.setText(f"<b>Срок:</b> {data[3] if data[3] else 'Не указан'}")
 
@@ -502,6 +524,17 @@ class MainWindow(QMainWindow):
                 self.task_subject.setText(f"<b>Предмет:</b> {sub_name}")
             else:
                 self.task_subject.setText("<b>Предмет:</b> -")
+
+            # Показываем статус
+            status_text = data[5] if len(data) > 5 and data[5] else 'active'
+            status_display = "Архив" if status_text == 'archived' else "Активно"
+            self.task_status.setText(f"<b>Статус:</b> {status_display}")
+
+            # Обновляем текст кнопки архива
+            if status_text == 'archived':
+                self.btn_archive_task.setText("Восстановить")
+            else:
+                self.btn_archive_task.setText("Архив")
 
             self.task_desc.setText(data[2] if data[2] else "Нет описания")
 
@@ -520,7 +553,7 @@ class MainWindow(QMainWindow):
 
         try:
             tid = item.data(Qt.ItemDataRole.UserRole)
-            data = database.get_task_details(tid)  # (id, title, desc, due_date, subject_id)
+            data = database.get_task_details(tid)  # (id, title, desc, due_date, subject_id, status)
 
             if not data:
                 QMessageBox.warning(self, "Ошибка", "Задача не найдена в базе.")
@@ -577,8 +610,37 @@ class MainWindow(QMainWindow):
             self.task_title.setText("Название: -")
             self.task_subject.setText("Предмет: -")
             self.task_date.setText("Срок: -")
+            self.task_status.setText("Статус: -")
             self.task_desc.setText("-")
             self.update_calendar_deadlines()
+
+    def toggle_archive_task(self):
+        item = self.tasks_list.currentItem()
+        if not item: return
+
+        tid = item.data(Qt.ItemDataRole.UserRole)
+        data = database.get_task_details(tid)
+
+        if not data:
+            return
+
+        # data = (id, title, description, due_date, subject_id, status)
+        current_status = data[5] if len(data) > 5 and data[5] else 'active'
+
+        if current_status == 'archived':
+            database.restore_task(tid)
+            QMessageBox.information(self, "Готово", "Задание восстановлено из архива")
+        else:
+            database.archive_task(tid)
+            QMessageBox.information(self, "Готово", "Задание перемещено в архив")
+
+        self.load_tasks()
+        self.update_calendar_deadlines()
+        # Обновляем детали
+        current_row = self.tasks_list.row(item)
+        new_item = self.tasks_list.item(current_row)
+        if new_item:
+            self.show_task_details(new_item)
 
     def setup_notes_ui(self):
         page = self.ui.page_notes
@@ -592,15 +654,15 @@ class MainWindow(QMainWindow):
         toolbar_layout = QHBoxLayout()
         toolbar_layout.setContentsMargins(5, 5, 5, 5)
 
-        self.btn_open = QPushButton("📂 Открыть")
+        self.btn_open = QPushButton("Открыть")
         self.btn_open.clicked.connect(self.open_file)
         toolbar_layout.addWidget(self.btn_open)
 
-        self.btn_save = QPushButton("💾 Сохранить")
+        self.btn_save = QPushButton("Сохранить")
         self.btn_save.clicked.connect(self.save_file)
         toolbar_layout.addWidget(self.btn_save)
 
-        self.btn_save_as = QPushButton("📤 Сохранить как...")
+        self.btn_save_as = QPushButton("Сохранить как...")
         self.btn_save_as.clicked.connect(self.save_file_as)
         toolbar_layout.addWidget(self.btn_save_as)
 
