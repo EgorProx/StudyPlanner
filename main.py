@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 import database
 from docx import Document
 from docx.shared import Pt, RGBColor
@@ -7,13 +8,23 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QMessageBox, QWidget,
                              QVBoxLayout, QHBoxLayout, QListWidget, QLabel,
                              QLineEdit, QPushButton, QTextEdit, QCalendarWidget,
-                             QComboBox, QFileDialog, QInputDialog, QFrame, QDialog, QDialogButtonBox, QFormLayout)
+                             QComboBox, QFileDialog, QInputDialog, QFrame, QDialog, QDialogButtonBox, QFormLayout,
+                             QListWidgetItem)
 from PyQt6.QtCore import Qt, QDate
-from PyQt6.QtGui import QTextCharFormat, QColor, QBrush, QFont, QTextCursor, QTextBlockFormat
+from PyQt6.QtGui import QTextCharFormat, QColor, QBrush, QFont, QTextCursor, QTextBlockFormat, QKeySequence, QShortcut
 from ui_py.ui_main import Ui_MainWindow
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
 
-# --- Диалог для добавления/редактирования задачи ---
+
 class TaskDialog(QDialog):
     def __init__(self, parent=None, subjects=None, task_data=None):
         super().__init__(parent)
@@ -29,14 +40,13 @@ class TaskDialog(QDialog):
         self.combo_subject = QComboBox()
         self.input_desc = QLineEdit()
 
-        # Заполняем предметы
-        self.subjects_map = {}  # map name -> id
+        self.subjects_map = {}
         if subjects:
             for sub in subjects:
-                self.combo_subject.addItem(sub[1], sub[0])  # text, data
+                self.combo_subject.addItem(sub[1], sub[0])
                 self.subjects_map[sub[1]] = sub[0]
 
-        self.combo_subject.addItem("Без предмета", None)  # Опция "без привязки"
+        self.combo_subject.addItem("Без предмета", None)
 
         form_layout.addRow("Название:", self.input_title)
         form_layout.addRow("Срок:", self.input_date)
@@ -50,16 +60,12 @@ class TaskDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        # Если редактируем - заполняем данными
         if task_data:
-            # task_data = (id, title, due_date, subject_name)
             self.input_title.setText(task_data[1])
             self.input_date.setText(task_data[2] if task_data[2] else "")
-            self.input_desc.setText(
-                task_data[4] if len(task_data) > 4 else "")  # desc is not in get_all_tasks list, but we can pass it
+            self.input_desc.setText(task_data[4] if len(task_data) > 4 else "")
 
-            # Ищем индекс предмета
-            if task_data[3]:  # subject_name
+            if task_data[3]:
                 index = self.combo_subject.findText(task_data[3])
                 if index >= 0:
                     self.combo_subject.setCurrentIndex(index)
@@ -76,7 +82,83 @@ class TaskDialog(QDialog):
         }
 
 
-# --- Основное окно ---
+class SearchDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Глобальный поиск")
+        self.resize(400, 100)
+        self.parent_window = parent
+
+        layout = QVBoxLayout(self)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Введите текст для поиска...")
+        self.search_input.returnPressed.connect(self.perform_search)
+        layout.addWidget(self.search_input)
+
+        btn_search = QPushButton("Найти")
+        btn_search.clicked.connect(self.perform_search)
+        layout.addWidget(btn_search)
+
+        self.search_input.setFocus()
+
+    def perform_search(self):
+        query = self.search_input.text().strip()
+        if not query:
+            return
+
+        results = database.global_search(query)
+        self.close()
+
+        if not results:
+            QMessageBox.information(self.parent_window, "Поиск", "Ничего не найдено")
+            return
+
+        results_dialog = SearchResultsDialog(self.parent_window, results)
+        results_dialog.exec()
+
+
+class SearchResultsDialog(QDialog):
+    def __init__(self, parent=None, results=None):
+        super().__init__(parent)
+        self.setWindowTitle("Результаты поиска")
+        self.resize(400, 300)
+        self.parent_window = parent
+
+        layout = QVBoxLayout(self)
+        self.list_widget = QListWidget()
+        layout.addWidget(self.list_widget)
+
+        self.results_map = {}
+
+        if results:
+            for item in results:
+                item_id, name, item_type, extra = item
+                if item_type == 'subject':
+                    display_text = f"[Предмет] {name}"
+                    self.list_widget.addItem(display_text)
+                    self.results_map[self.list_widget.count() - 1] = ('subject', item_id)
+                elif item_type == 'task':
+                    display_text = f"[Задание] {name}"
+                    if extra:
+                        display_text += f" (Предмет: {extra})"
+                    self.list_widget.addItem(display_text)
+                    self.results_map[self.list_widget.count() - 1] = ('task', item_id)
+
+        self.list_widget.itemClicked.connect(self.on_item_clicked)
+        self.list_widget.itemDoubleClicked.connect(self.on_item_clicked)
+
+        btn_close = QPushButton("Закрыть")
+        btn_close.clicked.connect(self.close)
+        layout.addWidget(btn_close)
+
+    def on_item_clicked(self, item):
+        row = self.list_widget.row(item)
+        if row in self.results_map:
+            item_type, item_id = self.results_map[row]
+            self.parent_window.navigate_to_item(item_type, item_id)
+            self.close()
+
 
 STYLES = {
     "light": """
@@ -88,7 +170,6 @@ STYLES = {
         QPushButton:hover { background-color: #0056b3; }
         QLineEdit, QTextEdit, QComboBox { background-color: white; border: 1px solid #ccc; border-radius: 6px; padding: 8px; color: #333; }
 
-        /* CALENDAR LIGHT */
         QCalendarWidget QTableView { background-color: white; color: #333; selection-background-color: #007bff; selection-color: white; }
         QCalendarWidget QToolButton { color: #333; background-color: transparent; }
         QCalendarWidget QWidget#qt_calendar_navigationbar { background-color: #e0e0e0; }
@@ -102,7 +183,6 @@ STYLES = {
         QPushButton:hover { background-color: #5a95e5; }
         QLineEdit, QTextEdit, QComboBox { background-color: #2d2d2d; border: 1px solid #444; border-radius: 6px; padding: 8px; color: white; }
 
-        /* CALENDAR DARK - Полностью переделано */
         QCalendarWidget { background-color: #121212; }
         QCalendarWidget QTableView { 
             background-color: #1e1e1e; 
@@ -170,7 +250,6 @@ class MainWindow(QMainWindow):
         self.storage_path = database.get_setting('path', '')
 
         self.current_note_path = None
-        # Состояние сортировки
         self.is_subj_reverse = False
         self.is_task_reverse = False
 
@@ -180,6 +259,7 @@ class MainWindow(QMainWindow):
         self.setup_tasks_ui()
         self.setup_notes_ui()
         self.setup_menu_logic()
+        self.setup_global_search()
         self.load_subjects()
         self.load_tasks()
         self.update_calendar_deadlines()
@@ -195,6 +275,65 @@ class MainWindow(QMainWindow):
         self.ui.menuList.addItem("Задания")
         self.ui.menuList.addItem("Блокнот")
         self.ui.menuList.currentRowChanged.connect(self.change_page)
+
+    def setup_global_search(self):
+        search_menu = self.ui.menubar.addMenu("Поиск")
+        search_action = search_menu.addAction("Глобальный поиск")
+        search_action.triggered.connect(self.open_search_dialog)
+
+        self.search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.search_shortcut.activated.connect(self.open_search_dialog)
+
+    def open_search_dialog(self):
+        dialog = SearchDialog(self)
+        dialog.exec()
+
+    def navigate_to_item(self, item_type, item_id):
+        if item_type == 'subject':
+            self.ui.menuList.setCurrentRow(0)
+            self.ui.pagesStack.setCurrentWidget(self.ui.page_subjects)
+            self.load_subjects()
+            for i in range(self.subjects_list.count()):
+                item = self.subjects_list.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == item_id:
+                    self.subjects_list.setCurrentItem(item)
+                    self.show_subject_details(item)
+                    break
+        elif item_type == 'task':
+            self.ui.menuList.setCurrentRow(3)
+            self.ui.pagesStack.setCurrentWidget(self.ui.page_tasks)
+            self.combo_task_status.setCurrentIndex(self.combo_task_status.findData("all"))
+            self.load_tasks()
+            for i in range(self.tasks_list.count()):
+                item = self.tasks_list.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == item_id:
+                    self.tasks_list.setCurrentItem(item)
+                    self.show_task_details(item)
+                    break
+
+    def get_task_status_info(self, due_date_str, completed, status):
+        if completed:
+            return "Выполнено", QColor(0, 128, 0)
+
+        if status == 'archived':
+            return "В архиве", QColor(128, 128, 128)
+
+        if not due_date_str:
+            return "Без даты", QColor(128, 128, 128)
+
+        try:
+            due_date = QDate.fromString(due_date_str, "yyyy-MM-dd")
+            today = QDate.currentDate()
+
+            if due_date < today:
+                return "Просрочено", QColor(220, 20, 60)
+            elif due_date <= today.addDays(3):
+                return "Скоро дедлайн", QColor(255, 140, 0)
+            else:
+                default_color = QColor(0, 0, 0) if self.current_theme == 'light' else QColor(255, 255, 255)
+                return "Активно", default_color
+        except:
+            return "Неизвестно", QColor(128, 128, 128)
 
     def change_page(self, index):
         if index == 0:
@@ -400,6 +539,7 @@ class MainWindow(QMainWindow):
         self.current_theme = theme
         self.apply_theme(theme)
         database.save_setting('theme', theme)
+        self.load_tasks()
 
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Выберите папку")
@@ -416,7 +556,6 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout()
         left_layout.addWidget(QLabel("<h2>Список заданий</h2>"))
 
-        # Фильтр статуса задач
         status_layout = QHBoxLayout()
         status_layout.addWidget(QLabel("Показать:"))
         self.combo_task_status = QComboBox()
@@ -453,15 +592,17 @@ class MainWindow(QMainWindow):
         self.btn_add_task = QPushButton("Добавить")
         self.btn_edit_task = QPushButton("Ред.")
         self.btn_del_task = QPushButton("Удалить")
-        self.btn_archive_task = QPushButton("Архив")
-        self.btn_archive_task.setToolTip("Архивировать/Восстановить задание")
+        self.btn_complete_task = QPushButton("Выполнено")
+        self.btn_archive_task = QPushButton("В архив")
         self.btn_add_task.clicked.connect(self.add_task)
         self.btn_edit_task.clicked.connect(self.edit_task)
         self.btn_del_task.clicked.connect(self.delete_task)
+        self.btn_complete_task.clicked.connect(self.toggle_complete_task)
         self.btn_archive_task.clicked.connect(self.toggle_archive_task)
         btn_layout.addWidget(self.btn_add_task)
         btn_layout.addWidget(self.btn_edit_task)
         btn_layout.addWidget(self.btn_del_task)
+        btn_layout.addWidget(self.btn_complete_task)
         btn_layout.addWidget(self.btn_archive_task)
         left_layout.addLayout(btn_layout)
         right_layout = QVBoxLayout()
@@ -472,10 +613,12 @@ class MainWindow(QMainWindow):
         self.task_title = QLabel("Название: -")
         self.task_subject = QLabel("Предмет: -")
         self.task_date = QLabel("Срок: -")
-        self.task_status = QLabel("Статус: -")
+        self.task_completed = QLabel("Выполнение: -")
+        self.task_status = QLabel("Архив: -")
         info_layout.addWidget(self.task_title)
         info_layout.addWidget(self.task_subject)
         info_layout.addWidget(self.task_date)
+        info_layout.addWidget(self.task_completed)
         info_layout.addWidget(self.task_status)
         info_layout.addSpacing(10)
         info_layout.addWidget(QLabel("<b>Описание:</b>"))
@@ -493,31 +636,66 @@ class MainWindow(QMainWindow):
         self.load_tasks()
 
     def load_tasks(self):
-        self.tasks_list.clear()
-        sort_mode = self.combo_task_sort.currentData()
-        if not sort_mode: sort_mode = 'due_date'
+        logger.debug("Начало load_tasks")
+        try:
+            self.tasks_list.clear()
+            sort_mode = self.combo_task_sort.currentData()
+            if not sort_mode: sort_mode = 'due_date'
 
-        status_filter = self.combo_task_status.currentData()
-        if not status_filter: status_filter = 'active'
+            status_filter = self.combo_task_status.currentData()
+            if not status_filter: status_filter = 'active'
 
-        data = database.get_all_tasks(sort_by=sort_mode, reverse=self.is_task_reverse, status_filter=status_filter)
-        # data structure: (id, title, due_date, subject_name, status)
-        for row in data:
-            subject_name = row[3] if row[3] else "Без предмета"
-            date_str = row[2] if row[2] else "Без даты"
-            status_icon = "(Архив)" if row[4] == 'archived' else "(Активное)"
-            self.tasks_list.addItem(f"{status_icon} [{subject_name}] {row[1]} ({date_str})")
-            self.tasks_list.item(self.tasks_list.count() - 1).setData(Qt.ItemDataRole.UserRole, row[0])
+            logger.debug(f"Параметры: sort_mode={sort_mode}, status_filter={status_filter}")
+
+            data = database.get_all_tasks(sort_by=sort_mode, reverse=self.is_task_reverse, status_filter=status_filter)
+            logger.debug(f"Получено {len(data)} задач")
+
+            for row in data:
+                logger.debug(f"Обработка строки: {row}")
+                subject_name = row[3] if row[3] else "Без предмета"
+                date_str = row[2] if row[2] else "Без даты"
+                completed = row[5] if len(row) > 5 else 0
+                status = row[4] if len(row) > 4 else 'active'
+
+                status_text, color = self.get_task_status_info(row[2], completed, status)
+                item_text = f"[{status_text}] [{subject_name}] {row[1]} ({date_str})"
+
+                item = QListWidgetItem(item_text)
+                item.setData(Qt.ItemDataRole.UserRole, row[0])
+                item.setForeground(color)
+
+                self.tasks_list.addItem(item)
+            logger.debug("load_tasks завершен успешно")
+        except Exception as e:
+            logger.error(f"Ошибка в load_tasks: {e}", exc_info=True)
 
     def show_task_details(self, item):
-        tid = item.data(Qt.ItemDataRole.UserRole)
-        data = database.get_task_details(tid)
-        if data:
-            # data = (id, title, description, due_date, subject_id, status)
+        logger.debug(f"show_task_details вызван, item={item}")
+        if not item:
+            logger.warning("item is None")
+            return
+
+        try:
+            tid = item.data(Qt.ItemDataRole.UserRole)
+            logger.debug(f"tid={tid}")
+
+            if not tid:
+                logger.warning("tid is None")
+                return
+
+            data = database.get_task_details(tid)
+            logger.debug(f"Данные из БД: {data}")
+
+            if not data:
+                logger.warning("Нет данных для задачи")
+                return
+
+            logger.debug(f"Длина данных: {len(data)}")
+
             self.task_title.setText(f"<b>Название:</b> {data[1]}")
             self.task_date.setText(f"<b>Срок:</b> {data[3] if data[3] else 'Не указан'}")
 
-            sub_id = data[4]
+            sub_id = data[4] if len(data) > 4 else None
             if sub_id:
                 sub_details = database.get_subject_details(sub_id)
                 sub_name = sub_details[1] if sub_details else "Неизвестен"
@@ -525,18 +703,28 @@ class MainWindow(QMainWindow):
             else:
                 self.task_subject.setText("<b>Предмет:</b> -")
 
-            # Показываем статус
-            status_text = data[5] if len(data) > 5 and data[5] else 'active'
-            status_display = "Архив" if status_text == 'archived' else "Активно"
-            self.task_status.setText(f"<b>Статус:</b> {status_display}")
+            status = data[5] if len(data) > 5 else 'active'
+            completed = data[6] if len(data) > 6 else 0
 
-            # Обновляем текст кнопки архива
-            if status_text == 'archived':
-                self.btn_archive_task.setText("Восстановить")
+            logger.debug(f"status={status}, completed={completed}")
+
+            self.task_completed.setText(f"<b>Выполнение:</b> {'Да' if completed else 'Нет'}")
+            self.task_status.setText(f"<b>Архив:</b> {'Да' if status == 'archived' else 'Нет'}")
+
+            if completed:
+                self.btn_complete_task.setText("Не выполнено")
             else:
-                self.btn_archive_task.setText("Архив")
+                self.btn_complete_task.setText("Выполнено")
+
+            if status == 'archived':
+                self.btn_archive_task.setText("Из архива")
+            else:
+                self.btn_archive_task.setText("В архив")
 
             self.task_desc.setText(data[2] if data[2] else "Нет описания")
+            logger.debug("show_task_details завершен")
+        except Exception as e:
+            logger.error(f"Ошибка в show_task_details: {e}", exc_info=True)
 
     def add_task(self):
         subjects = database.get_all_subjects()
@@ -553,15 +741,14 @@ class MainWindow(QMainWindow):
 
         try:
             tid = item.data(Qt.ItemDataRole.UserRole)
-            data = database.get_task_details(tid)  # (id, title, desc, due_date, subject_id, status)
+            data = database.get_task_details(tid)
 
             if not data:
                 QMessageBox.warning(self, "Ошибка", "Задача не найдена в базе.")
                 return
 
-            # Нам нужно полное имя предмета для диалога
             subject_name = None
-            sub_id = data[4]
+            sub_id = data[4] if len(data) > 4 else None
 
             if sub_id:
                 try:
@@ -571,24 +758,21 @@ class MainWindow(QMainWindow):
                 except:
                     subject_name = None
 
-            # Формируем данные для диалога
-            # (id, title, due_date, subject_name, description)
-            task_data_for_dialog = (data[0], data[1], data[3], subject_name, data[2])
+            task_data_for_dialog = (data[0], data[1], data[3], subject_name, data[2] if len(data) > 2 else "")
 
             subjects = database.get_all_subjects()
             dlg = TaskDialog(self, subjects, task_data_for_dialog)
 
             if dlg.exec():
                 new_data = dlg.get_data()
+                status = data[5] if len(data) > 5 else 'active'
+                completed = data[6] if len(data) > 6 else 0
 
-                # Обновляем в БД
                 database.update_task(tid, new_data['title'], new_data['description'], new_data['due_date'],
-                                     new_data['subject_id'])
+                                     new_data['subject_id'], status, completed)
 
-                # Перезагружаем список
                 self.load_tasks()
 
-                # Обновляем детали на экране (пытаемся найти тот же item по индексу)
                 current_row = self.tasks_list.row(item)
                 new_item = self.tasks_list.item(current_row)
                 if new_item:
@@ -598,7 +782,7 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка редактирования", f"Произошла ошибка при сохранении:\n{str(e)}")
-            print(f"Error: {e}")  # Для отладки в консоли
+            print(f"Error: {e}")
 
     def delete_task(self):
         item = self.tasks_list.currentItem()
@@ -610,37 +794,105 @@ class MainWindow(QMainWindow):
             self.task_title.setText("Название: -")
             self.task_subject.setText("Предмет: -")
             self.task_date.setText("Срок: -")
-            self.task_status.setText("Статус: -")
+            self.task_completed.setText("Выполнение: -")
+            self.task_status.setText("Архив: -")
             self.task_desc.setText("-")
             self.update_calendar_deadlines()
 
+    def toggle_complete_task(self):
+        logger.debug("toggle_complete_task вызван")
+        try:
+            item = self.tasks_list.currentItem()
+            if not item:
+                logger.warning("Нет выбранного item")
+                return
+
+            tid = item.data(Qt.ItemDataRole.UserRole)
+            logger.debug(f"tid={tid}")
+
+            data = database.get_task_details(tid)
+            logger.debug(f"Данные: {data}")
+
+            if not data:
+                logger.warning("Нет данных")
+                return
+
+            completed = data[6] if len(data) > 6 else 0
+            new_completed = 0 if completed else 1
+
+            logger.debug(f"Меняем completed с {completed} на {new_completed}")
+
+            database.toggle_task_completed(tid, new_completed)
+
+            self.load_tasks()
+
+            for i in range(self.tasks_list.count()):
+                new_item = self.tasks_list.item(i)
+                if new_item.data(Qt.ItemDataRole.UserRole) == tid:
+                    self.tasks_list.setCurrentItem(new_item)
+                    self.show_task_details(new_item)
+                    break
+            logger.debug("toggle_complete_task завершен")
+        except Exception as e:
+            logger.error(f"Ошибка в toggle_complete_task: {e}", exc_info=True)
+
     def toggle_archive_task(self):
-        item = self.tasks_list.currentItem()
-        if not item: return
+        logger.debug("toggle_archive_task вызван")
+        try:
+            item = self.tasks_list.currentItem()
+            if not item:
+                logger.warning("Нет выбранного item")
+                return
 
-        tid = item.data(Qt.ItemDataRole.UserRole)
-        data = database.get_task_details(tid)
+            tid = item.data(Qt.ItemDataRole.UserRole)
+            logger.debug(f"tid={tid}")
 
-        if not data:
-            return
+            data = database.get_task_details(tid)
+            logger.debug(f"Данные: {data}")
 
-        # data = (id, title, description, due_date, subject_id, status)
-        current_status = data[5] if len(data) > 5 and data[5] else 'active'
+            if not data:
+                logger.warning("Нет данных")
+                return
 
-        if current_status == 'archived':
-            database.restore_task(tid)
-            QMessageBox.information(self, "Готово", "Задание восстановлено из архива")
-        else:
-            database.archive_task(tid)
-            QMessageBox.information(self, "Готово", "Задание перемещено в архив")
+            current_status = data[5] if len(data) > 5 else 'active'
+            logger.debug(f"current_status={current_status}")
 
-        self.load_tasks()
-        self.update_calendar_deadlines()
-        # Обновляем детали
-        current_row = self.tasks_list.row(item)
-        new_item = self.tasks_list.item(current_row)
-        if new_item:
-            self.show_task_details(new_item)
+            if current_status == 'archived':
+                logger.debug("Восстанавливаем из архива")
+                database.restore_task(tid)
+                QMessageBox.information(self, "Готово", "Задание восстановлено из архива")
+            else:
+                logger.debug("Архивируем")
+                database.archive_task(tid)
+                QMessageBox.information(self, "Готово", "Задание перемещено в архив")
+
+            logger.debug("Перезагружаем список")
+            self.load_tasks()
+            self.update_calendar_deadlines()
+
+            logger.debug("Ищем элемент в обновленном списке")
+            found = False
+            for i in range(self.tasks_list.count()):
+                new_item = self.tasks_list.item(i)
+                if new_item.data(Qt.ItemDataRole.UserRole) == tid:
+                    self.tasks_list.setCurrentItem(new_item)
+                    self.show_task_details(new_item)
+                    found = True
+                    break
+
+            if not found:
+                logger.debug("Элемент не найден в новом списке (возможно, фильтр скрыл его)")
+                self.task_title.setText("Название: -")
+                self.task_subject.setText("Предмет: -")
+                self.task_date.setText("Срок: -")
+                self.task_completed.setText("Выполнение: -")
+                self.task_status.setText("Архив: -")
+                self.task_desc.setText("-")
+
+            logger.debug("toggle_archive_task завершен")
+        except Exception as e:
+            logger.error(f"Ошибка в toggle_archive_task: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка: {str(e)}")
 
     def setup_notes_ui(self):
         page = self.ui.page_notes
@@ -700,7 +952,7 @@ class MainWindow(QMainWindow):
 
     def update_note_path_label(self):
         if self.current_note_path:
-            self.lbl_current_file.setText(f"📄 {self.current_note_path}")
+            self.lbl_current_file.setText(f"[Открыт] {self.current_note_path}")
         else:
             self.lbl_current_file.setText("<b>Новый файл</b> (не сохранен)")
 

@@ -1,5 +1,6 @@
 import sqlite3
 
+
 def init_db():
     conn = sqlite3.connect('study_planner.db')
     cursor = conn.cursor()
@@ -22,18 +23,23 @@ def init_db():
             due_date TEXT,
             subject_id INTEGER DEFAULT NULL,
             status TEXT DEFAULT 'active',
+            completed INTEGER DEFAULT 0,
             FOREIGN KEY(subject_id) REFERENCES subjects(id)
         )
     ''')
 
-    # Добавляем колонку status, если ее нет
     try:
         cursor.execute("ALTER TABLE tasks ADD COLUMN status TEXT DEFAULT 'active'")
     except sqlite3.OperationalError:
         pass
 
-    # Для старых задач, у которых статус NULL, ставим 'active'
+    try:
+        cursor.execute("ALTER TABLE tasks ADD COLUMN completed INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
     cursor.execute("UPDATE tasks SET status='active' WHERE status IS NULL")
+    cursor.execute("UPDATE tasks SET completed=0 WHERE completed IS NULL")
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS settings (
@@ -123,14 +129,12 @@ def save_setting(key, value):
     conn.close()
 
 
-# --- Функции задач (с учетом статуса и архива) ---
-
 def add_task(title, description, due_date, subject_id):
     conn = sqlite3.connect('study_planner.db')
     cursor = conn.cursor()
-    # По умолчанию активная
-    cursor.execute("INSERT INTO tasks (title, description, due_date, subject_id, status) VALUES (?, ?, ?, ?, 'active')",
-                   (title, description, due_date, subject_id))
+    cursor.execute(
+        "INSERT INTO tasks (title, description, due_date, subject_id, status, completed) VALUES (?, ?, ?, ?, 'active', 0)",
+        (title, description, due_date, subject_id))
     conn.commit()
     conn.close()
 
@@ -150,13 +154,12 @@ def get_all_tasks(sort_by='due_date', reverse=False, status_filter='active'):
     if reverse:
         order_clause = order_clause.replace("ASC", "DESC")
 
-    # Фильтр по статусу
     where_clause = ""
     if status_filter and status_filter != 'all':
         where_clause = f" AND t.status = '{status_filter}'"
 
     query = f"""
-        SELECT t.id, t.title, t.due_date, s.name, t.status 
+        SELECT t.id, t.title, t.due_date, s.name, t.status, t.completed 
         FROM tasks t 
         LEFT JOIN subjects s ON t.subject_id = s.id 
         WHERE 1=1 {where_clause}
@@ -177,14 +180,14 @@ def delete_task(task_id):
     conn.close()
 
 
-def update_task(task_id, title, description, due_date, subject_id, status='active'):
+def update_task(task_id, title, description, due_date, subject_id, status='active', completed=0):
     conn = sqlite3.connect('study_planner.db')
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE tasks 
-        SET title=?, description=?, due_date=?, subject_id=?, status=?
+        SET title=?, description=?, due_date=?, subject_id=?, status=?, completed=?
         WHERE id=?
-    """, (title, description, due_date, subject_id, status, task_id))
+    """, (title, description, due_date, subject_id, status, completed, task_id))
     conn.commit()
     conn.close()
 
@@ -196,12 +199,22 @@ def archive_task(task_id):
     conn.commit()
     conn.close()
 
+
 def restore_task(task_id):
     conn = sqlite3.connect('study_planner.db')
     cursor = conn.cursor()
     cursor.execute("UPDATE tasks SET status='active' WHERE id = ?", (task_id,))
     conn.commit()
     conn.close()
+
+
+def toggle_task_completed(task_id, completed):
+    conn = sqlite3.connect('study_planner.db')
+    cursor = conn.cursor()
+    cursor.execute("UPDATE tasks SET completed=? WHERE id = ?", (1 if completed else 0, task_id))
+    conn.commit()
+    conn.close()
+
 
 def get_task_details(task_id):
     conn = sqlite3.connect('study_planner.db')
@@ -210,3 +223,28 @@ def get_task_details(task_id):
     data = cursor.fetchone()
     conn.close()
     return data
+
+
+def global_search(query):
+    conn = sqlite3.connect('study_planner.db')
+    cursor = conn.cursor()
+    results = []
+    search_pattern = f'%{query}%'
+
+    cursor.execute("""
+        SELECT id, name, 'subject' as type, NULL as extra 
+        FROM subjects 
+        WHERE name LIKE ? OR teacher LIKE ? OR description LIKE ? OR room LIKE ?
+    """, (search_pattern, search_pattern, search_pattern, search_pattern))
+    results.extend(cursor.fetchall())
+
+    cursor.execute("""
+        SELECT t.id, t.title, 'task' as type, s.name as extra 
+        FROM tasks t 
+        LEFT JOIN subjects s ON t.subject_id = s.id 
+        WHERE t.title LIKE ? OR t.description LIKE ?
+    """, (search_pattern, search_pattern))
+    results.extend(cursor.fetchall())
+
+    conn.close()
+    return results
