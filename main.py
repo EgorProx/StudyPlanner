@@ -1,3 +1,4 @@
+# main.py
 import sys
 import os
 import logging
@@ -131,22 +132,35 @@ class SearchResultsDialog(QDialog):
 
         self.results_map = {}
 
+        logger.info(f"SearchResultsDialog: получено {len(results) if results else 0} результатов")
+
         if results:
-            for item in results:
-                item_id, name, item_type, extra = item
-                if item_type == 'subject':
-                    display_text = f"[Предмет] {name}"
-                    self.list_widget.addItem(display_text)
-                    self.results_map[self.list_widget.count() - 1] = ('subject', item_id)
-                elif item_type == 'task':
-                    display_text = f"[Задание] {name}"
-                    if extra:
-                        display_text += f" (Предмет: {extra})"
-                    self.list_widget.addItem(display_text)
-                    self.results_map[self.list_widget.count() - 1] = ('task', item_id)
+            for i, item in enumerate(results):
+                logger.debug(f"SearchResultsDialog: обработка item {i}: {item}")
+                try:
+                    item_id, name, item_type, extra = item
+                    if item_type == 'subject':
+                        display_text = f"[Предмет] {name}"
+                        self.list_widget.addItem(display_text)
+                        self.results_map[self.list_widget.count() - 1] = ('subject', item_id)
+                        logger.debug(f"  Добавлен предмет: {display_text}")
+                    elif item_type == 'task':
+                        display_text = f"[Задание] {name}"
+                        if extra:
+                            display_text += f" (Предмет: {extra})"
+                        self.list_widget.addItem(display_text)
+                        self.results_map[self.list_widget.count() - 1] = ('task', item_id)
+                        logger.debug(f"  Добавлена задача: {display_text}")
+                    else:
+                        logger.warning(f"  Неизвестный тип: {item_type}")
+                except Exception as e:
+                    logger.error(f"  Ошибка обработки item {i}: {e}, item={item}")
 
         self.list_widget.itemClicked.connect(self.on_item_clicked)
         self.list_widget.itemDoubleClicked.connect(self.on_item_clicked)
+
+        logger.info(f"SearchResultsDialog: отображено {self.list_widget.count()} элементов")
+        logger.info(f"SearchResultsDialog: results_map = {self.results_map}")
 
         btn_close = QPushButton("Закрыть")
         btn_close.clicked.connect(self.close)
@@ -242,6 +256,7 @@ STYLES = {
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        logger.info("=== ЗАПУСК ПРИЛОЖЕНИЯ ===")
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
         database.init_db()
@@ -263,6 +278,7 @@ class MainWindow(QMainWindow):
         self.load_subjects()
         self.load_tasks()
         self.update_calendar_deadlines()
+        logger.info("=== ИНИЦИАЛИЗАЦИЯ ЗАВЕРШЕНА ===")
 
     def apply_theme(self, theme_name):
         app = QApplication.instance()
@@ -289,6 +305,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def navigate_to_item(self, item_type, item_id):
+        logger.debug(f"navigate_to_item: type={item_type}, id={item_id}")
         if item_type == 'subject':
             self.ui.menuList.setCurrentRow(0)
             self.ui.pagesStack.setCurrentWidget(self.ui.page_subjects)
@@ -336,6 +353,7 @@ class MainWindow(QMainWindow):
             return "Неизвестно", QColor(128, 128, 128)
 
     def change_page(self, index):
+        logger.debug(f"change_page: index={index}")
         if index == 0:
             self.ui.pagesStack.setCurrentWidget(self.ui.page_subjects)
             self.load_subjects()
@@ -353,6 +371,7 @@ class MainWindow(QMainWindow):
             self.update_note_path_label()
 
     def setup_subjects_ui(self):
+        logger.debug("setup_subjects_ui")
         page = self.ui.page_subjects
         layout = QHBoxLayout(page)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -415,62 +434,186 @@ class MainWindow(QMainWindow):
         layout.addLayout(right_layout, 70)
 
     def toggle_subject_sort(self):
+        logger.debug("toggle_subject_sort")
         self.is_subj_reverse = not self.is_subj_reverse
         self.load_subjects()
 
     def load_subjects(self):
-        self.subjects_list.clear()
-        sort_mode = self.combo_subj_sort.currentData()
-        if not sort_mode: sort_mode = 'name'
+        logger.debug("=== НАЧАЛО load_subjects ===")
+        try:
+            self.subjects_list.clear()
+            sort_mode = self.combo_subj_sort.currentData()
+            if not sort_mode:
+                sort_mode = 'name'
 
-        data = database.get_all_subjects(sort_by=sort_mode, reverse=self.is_subj_reverse)
-        for row in data:
-            self.subjects_list.addItem(f"{row[1]} (каб. {row[3]})")
-            self.subjects_list.item(self.subjects_list.count() - 1).setData(Qt.ItemDataRole.UserRole, row[0])
+            logger.debug(f"load_subjects: sort_mode={sort_mode}, reverse={self.is_subj_reverse}")
+
+            data = database.get_all_subjects(sort_by=sort_mode, reverse=self.is_subj_reverse)
+            logger.debug(f"load_subjects: получено {len(data)} предметов")
+
+            for i, row in enumerate(data):
+                logger.debug(f"load_subjects: обработка строки {i}: {row}")
+                if len(row) < 5:
+                    logger.error(f"load_subjects: некорректная строка {i}: {row}")
+                    continue
+
+                # row = (id, name, teacher, room, description)
+                display_text = f"{row[1]} (каб. {row[3] or '-'})"
+                item = QListWidgetItem(display_text)
+                item.setData(Qt.ItemDataRole.UserRole, row[0])
+                self.subjects_list.addItem(item)
+
+            logger.info(f"load_subjects: загружено {self.subjects_list.count()} предметов")
+
+        except Exception as e:
+            logger.error(f"load_subjects: КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        logger.debug("=== КОНЕЦ load_subjects ===")
 
     def show_subject_details(self, item):
-        sid = item.data(Qt.ItemDataRole.UserRole)
-        data = database.get_subject_details(sid)
-        if data:
-            self.lbl_name.setText(f"<b>Название:</b> {data[1]}")
-            self.lbl_teacher.setText(f"<b>Преподаватель:</b> {data[2]}")
-            self.lbl_room.setText(f"<b>Кабинет:</b> {data[3]}")
+        logger.debug(f"show_subject_details: item={item}")
+        try:
+            if not item:
+                logger.warning("show_subject_details: item is None")
+                return
+
+            sid = item.data(Qt.ItemDataRole.UserRole)
+            logger.debug(f"show_subject_details: sid={sid}")
+
+            if not sid:
+                logger.warning("show_subject_details: sid is None")
+                return
+
+            data = database.get_subject_details(sid)
+            logger.debug(f"show_subject_details: данные={data}")
+
+            if not data:
+                logger.warning(f"show_subject_details: предмет {sid} не найден")
+                self.lbl_name.setText("Название: <не найдено>")
+                return
+
+            if len(data) < 5:
+                logger.error(f"show_subject_details: некорректная структура данных: {data}")
+                return
+
+            self.lbl_name.setText(f"<b>Название:</b> {data[1] or '-'}")
+            self.lbl_teacher.setText(f"<b>Преподаватель:</b> {data[2] or '-'}")
+            self.lbl_room.setText(f"<b>Кабинет:</b> {data[3] or '-'}")
             self.txt_desc.setText(data[4] if data[4] else "Нет описания")
+            logger.debug("show_subject_details: успешно отображены данные")
+
+        except Exception as e:
+            logger.error(f"show_subject_details: ОШИБКА: {e}", exc_info=True)
 
     def add_subject(self):
-        name, ok = QInputDialog.getText(self, "Новый предмет", "Название:")
-        if ok and name:
-            teacher, ok1 = QInputDialog.getText(self, "Новый предмет", "Преподаватель:")
-            room, ok2 = QInputDialog.getText(self, "Новый предмет", "Кабинет:")
-            desc, ok3 = QInputDialog.getText(self, "Новый предмет", "Описание:", text="")
-            database.add_subject(name, teacher or "", room or "", desc or "")
-            self.load_subjects()
+        logger.debug("=== НАЧАЛО add_subject ===")
+        try:
+            name, ok = QInputDialog.getText(self, "Новый предмет", "Название:")
+            logger.debug(f"add_subject: name={name}, ok={ok}")
+
+            if ok and name:
+                teacher, ok1 = QInputDialog.getText(self, "Новый предмет", "Преподаватель:")
+                room, ok2 = QInputDialog.getText(self, "Новый предмет", "Кабинет:")
+                desc, ok3 = QInputDialog.getText(self, "Новый предмет", "Описание:", text="")
+
+                logger.debug(f"add_subject: teacher={teacher}, room={room}, desc={desc}")
+
+                database.add_subject(name, teacher or "", room or "", desc or "")
+                self.load_subjects()
+                logger.info(f"add_subject: предмет '{name}' добавлен")
+            elif ok and not name:
+                logger.warning("add_subject: пустое название")
+                QMessageBox.warning(self, "Ошибка", "Название предмета не может быть пустым")
+        except Exception as e:
+            logger.error(f"add_subject: ОШИБКА: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при добавлении:\n{str(e)}")
+        logger.debug("=== КОНЕЦ add_subject ===")
 
     def edit_subject(self):
-        item = self.subjects_list.currentItem()
-        if not item: return
-        sid = item.data(Qt.ItemDataRole.UserRole)
-        data = database.get_subject_details(sid)
-        name, ok = QInputDialog.getText(self, "Ред.", "Название:", text=data[1])
-        if ok:
-            teacher, ok1 = QInputDialog.getText(self, "Ред.", "Преподаватель:", text=data[2])
-            room, ok2 = QInputDialog.getText(self, "Ред.", "Кабинет:", text=data[3])
-            desc, ok3 = QInputDialog.getText(self, "Ред.", "Описание:", text=data[4] or "")
-            database.update_subject(sid, name, teacher or "", room or "", desc or "")
-            self.load_subjects()
-            self.show_subject_details(item)
+        logger.debug("=== НАЧАЛО edit_subject ===")
+        try:
+            item = self.subjects_list.currentItem()
+            if not item:
+                logger.warning("edit_subject: не выбран элемент")
+                return
+
+            sid = item.data(Qt.ItemDataRole.UserRole)
+            logger.debug(f"edit_subject: sid={sid}")
+
+            data = database.get_subject_details(sid)
+            logger.debug(f"edit_subject: данные из БД={data}")
+
+            if not data:
+                logger.error(f"edit_subject: предмет с id={sid} не найден в БД")
+                QMessageBox.warning(self, "Ошибка", "Предмет не найден в базе данных")
+                return
+
+            if len(data) < 5:
+                logger.error(f"edit_subject: некорректная структура данных: {data}")
+                QMessageBox.critical(self, "Ошибка", "Ошибка структуры данных")
+                return
+
+            name, ok = QInputDialog.getText(self, "Редактирование предмета", "Название:", text=data[1] or "")
+            logger.debug(f"edit_subject: name={name}, ok={ok}")
+
+            if ok:
+                teacher, ok1 = QInputDialog.getText(self, "Редактирование предмета", "Преподаватель:",
+                                                    text=data[2] or "")
+                room, ok2 = QInputDialog.getText(self, "Редактирование предмета", "Кабинет:", text=data[3] or "")
+                desc, ok3 = QInputDialog.getText(self, "Редактирование предмета", "Описание:", text=data[4] or "")
+
+                logger.debug(f"edit_subject: teacher={teacher}, room={room}, desc={desc}")
+
+                database.update_subject(sid, name or "", teacher or "", room or "", desc or "")
+                logger.info(f"edit_subject: предмет {sid} обновлён")
+
+                self.load_subjects()
+                # Находим обновлённый элемент и показываем детали
+                for i in range(self.subjects_list.count()):
+                    new_item = self.subjects_list.item(i)
+                    if new_item.data(Qt.ItemDataRole.UserRole) == sid:
+                        self.subjects_list.setCurrentItem(new_item)
+                        self.show_subject_details(new_item)
+                        break
+
+        except Exception as e:
+            logger.error(f"edit_subject: КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при редактировании:\n{str(e)}")
+        logger.debug("=== КОНЕЦ edit_subject ===")
 
     def delete_subject(self):
-        item = self.subjects_list.currentItem()
-        if not item: return
-        if QMessageBox.question(self, "Удаление", "Удалить предмет?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            database.delete_subject(item.data(Qt.ItemDataRole.UserRole))
-            self.load_subjects()
-            self.lbl_name.setText("Название: -")
-            self.lbl_teacher.setText("Преподаватель: -")
-            self.lbl_room.setText("Кабинет: -")
-            self.txt_desc.setText("-")
+        logger.debug("=== НАЧАЛО delete_subject ===")
+        try:
+            item = self.subjects_list.currentItem()
+            if not item:
+                logger.warning("delete_subject: не выбран элемент")
+                return
+
+            sid = item.data(Qt.ItemDataRole.UserRole)
+            logger.debug(f"delete_subject: удаление предмета id={sid}")
+
+            reply = QMessageBox.question(
+                self,
+                "Удаление",
+                "Удалить предмет?\nЗадачи, связанные с этим предметом, останутся без привязки.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                database.delete_subject(sid)
+                logger.info(f"delete_subject: предмет {sid} удалён")
+
+                self.load_subjects()
+                self.lbl_name.setText("Название: -")
+                self.lbl_teacher.setText("Преподаватель: -")
+                self.lbl_room.setText("Кабинет: -")
+                self.txt_desc.setText("-")
+            else:
+                logger.debug("delete_subject: удаление отменено пользователем")
+
+        except Exception as e:
+            logger.error(f"delete_subject: КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при удалении:\n{str(e)}")
+        logger.debug("=== КОНЕЦ delete_subject ===")
 
     def setup_calendar_ui(self):
         page = self.ui.page_calendar
@@ -486,27 +629,38 @@ class MainWindow(QMainWindow):
         self.calendar.clicked.connect(self.on_date_click)
 
     def update_calendar_deadlines(self):
-        self.calendar.setDateTextFormat(QDate(), QTextCharFormat())
-        tasks = database.get_all_tasks()
-        for task in tasks:
-            date_str = task[2]
-            if date_str:
-                y, m, d = map(int, date_str.split('-'))
-                qdate = QDate(y, m, d)
-                fmt = QTextCharFormat()
-                fmt.setBackground(QColor("#ffcccc"))
-                if self.current_theme == 'dark':
-                    fmt.setForeground(QBrush(QColor("white")))
-                self.calendar.setDateTextFormat(qdate, fmt)
+        logger.debug("update_calendar_deadlines")
+        try:
+            self.calendar.setDateTextFormat(QDate(), QTextCharFormat())
+            tasks = database.get_all_tasks()
+            for task in tasks:
+                date_str = task[2]
+                if date_str:
+                    try:
+                        y, m, d = map(int, date_str.split('-'))
+                        qdate = QDate(y, m, d)
+                        fmt = QTextCharFormat()
+                        fmt.setBackground(QColor("#ffcccc"))
+                        if self.current_theme == 'dark':
+                            fmt.setForeground(QBrush(QColor("white")))
+                        self.calendar.setDateTextFormat(qdate, fmt)
+                    except ValueError as e:
+                        logger.warning(f"update_calendar_deadlines: неверный формат даты '{date_str}': {e}")
+        except Exception as e:
+            logger.error(f"update_calendar_deadlines: ошибка: {e}", exc_info=True)
 
     def on_date_click(self, date):
-        date_str = date.toString("yyyy-MM-dd")
-        tasks = database.get_all_tasks()
-        task_names = [t[1] for t in tasks if t[2] == date_str]
-        if task_names:
-            self.lbl_date.setText(f"<b>{date.toString('dddd, d MMMM yyyy')}</b><br>Задачи: {', '.join(task_names)}")
-        else:
-            self.lbl_date.setText(f"{date.toString('dddd, d MMMM yyyy')}<br>Нет задач")
+        logger.debug(f"on_date_click: {date.toString('yyyy-MM-dd')}")
+        try:
+            date_str = date.toString("yyyy-MM-dd")
+            tasks = database.get_all_tasks()
+            task_names = [t[1] for t in tasks if t[2] == date_str]
+            if task_names:
+                self.lbl_date.setText(f"<b>{date.toString('dddd, d MMMM yyyy')}</b><br>Задачи: {', '.join(task_names)}")
+            else:
+                self.lbl_date.setText(f"{date.toString('dddd, d MMMM yyyy')}<br>Нет задач")
+        except Exception as e:
+            logger.error(f"on_date_click: ошибка: {e}", exc_info=True)
 
     def setup_settings_ui(self):
         page = self.ui.page_settings
@@ -536,6 +690,7 @@ class MainWindow(QMainWindow):
         self.edit_path.setText(self.storage_path)
 
     def change_theme(self, theme):
+        logger.debug(f"change_theme: {theme}")
         self.current_theme = theme
         self.apply_theme(theme)
         database.save_setting('theme', theme)
@@ -544,6 +699,7 @@ class MainWindow(QMainWindow):
     def browse_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Выберите папку")
         if folder:
+            logger.info(f"browse_folder: выбрана папка {folder}")
             self.storage_path = folder
             self.edit_path.setText(folder)
             database.save_setting('path', folder)
@@ -632,11 +788,12 @@ class MainWindow(QMainWindow):
         layout.addLayout(right_layout, 70)
 
     def toggle_task_sort(self):
+        logger.debug("toggle_task_sort")
         self.is_task_reverse = not self.is_task_reverse
         self.load_tasks()
 
     def load_tasks(self):
-        logger.debug("Начало load_tasks")
+        logger.debug("=== НАЧАЛО load_tasks ===")
         try:
             self.tasks_list.clear()
             sort_mode = self.combo_task_sort.currentData()
@@ -645,13 +802,14 @@ class MainWindow(QMainWindow):
             status_filter = self.combo_task_status.currentData()
             if not status_filter: status_filter = 'active'
 
-            logger.debug(f"Параметры: sort_mode={sort_mode}, status_filter={status_filter}")
+            logger.debug(
+                f"load_tasks: sort_mode={sort_mode}, status_filter={status_filter}, reverse={self.is_task_reverse}")
 
             data = database.get_all_tasks(sort_by=sort_mode, reverse=self.is_task_reverse, status_filter=status_filter)
-            logger.debug(f"Получено {len(data)} задач")
+            logger.debug(f"load_tasks: получено {len(data)} задач")
 
             for row in data:
-                logger.debug(f"Обработка строки: {row}")
+                logger.debug(f"load_tasks: обработка строки: {row}")
                 subject_name = row[3] if row[3] else "Без предмета"
                 date_str = row[2] if row[2] else "Без даты"
                 completed = row[5] if len(row) > 5 else 0
@@ -668,6 +826,7 @@ class MainWindow(QMainWindow):
             logger.debug("load_tasks завершен успешно")
         except Exception as e:
             logger.error(f"Ошибка в load_tasks: {e}", exc_info=True)
+        logger.debug("=== КОНЕЦ load_tasks ===")
 
     def show_task_details(self, item):
         logger.debug(f"show_task_details вызван, item={item}")
@@ -727,20 +886,32 @@ class MainWindow(QMainWindow):
             logger.error(f"Ошибка в show_task_details: {e}", exc_info=True)
 
     def add_task(self):
-        subjects = database.get_all_subjects()
-        dlg = TaskDialog(self, subjects)
-        if dlg.exec():
-            data = dlg.get_data()
-            database.add_task(data['title'], data['description'], data['due_date'], data['subject_id'])
-            self.load_tasks()
-            self.update_calendar_deadlines()
+        logger.debug("add_task")
+        try:
+            subjects = database.get_all_subjects()
+            dlg = TaskDialog(self, subjects)
+            if dlg.exec():
+                data = dlg.get_data()
+                logger.debug(f"add_task: данные диалога={data}")
+                database.add_task(data['title'], data['description'], data['due_date'], data['subject_id'])
+                self.load_tasks()
+                self.update_calendar_deadlines()
+                logger.info("add_task: задача добавлена")
+        except Exception as e:
+            logger.error(f"add_task: ошибка: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при добавлении задачи:\n{str(e)}")
 
     def edit_task(self):
+        logger.debug("=== НАЧАЛО edit_task ===")
         item = self.tasks_list.currentItem()
-        if not item: return
+        if not item:
+            logger.warning("edit_task: не выбран элемент")
+            return
 
         try:
             tid = item.data(Qt.ItemDataRole.UserRole)
+            logger.debug(f"edit_task: tid={tid}")
+
             data = database.get_task_details(tid)
 
             if not data:
@@ -755,7 +926,8 @@ class MainWindow(QMainWindow):
                     sub = database.get_subject_details(sub_id)
                     if sub:
                         subject_name = sub[1]
-                except:
+                except Exception as e:
+                    logger.warning(f"edit_task: ошибка получения предмета: {e}")
                     subject_name = None
 
             task_data_for_dialog = (data[0], data[1], data[3], subject_name, data[2] if len(data) > 2 else "")
@@ -765,39 +937,70 @@ class MainWindow(QMainWindow):
 
             if dlg.exec():
                 new_data = dlg.get_data()
+                logger.debug(f"edit_task: новые данные={new_data}")
+
                 status = data[5] if len(data) > 5 else 'active'
                 completed = data[6] if len(data) > 6 else 0
 
                 database.update_task(tid, new_data['title'], new_data['description'], new_data['due_date'],
                                      new_data['subject_id'], status, completed)
 
+                # СОХРАНЯЕМ tid ПЕРЕД перезагрузкой списка
+                saved_tid = tid
                 self.load_tasks()
-
-                current_row = self.tasks_list.row(item)
-                new_item = self.tasks_list.item(current_row)
-                if new_item:
-                    self.show_task_details(new_item)
-
                 self.update_calendar_deadlines()
 
+                # Ищем задачу по tid, а не по старому item
+                found = False
+                for i in range(self.tasks_list.count()):
+                    new_item = self.tasks_list.item(i)
+                    if new_item.data(Qt.ItemDataRole.UserRole) == saved_tid:
+                        self.tasks_list.setCurrentItem(new_item)
+                        self.show_task_details(new_item)
+                        found = True
+                        break
+
+                if not found:
+                    # Если задача не найдена (например, изменился фильтр), очищаем детали
+                    self.task_title.setText("Название: -")
+                    self.task_subject.setText("Предмет: -")
+                    self.task_date.setText("Срок: -")
+                    self.task_completed.setText("Выполнение: -")
+                    self.task_status.setText("Архив: -")
+                    self.task_desc.setText("-")
+
+                logger.info(f"edit_task: задача {saved_tid} обновлена")
+
         except Exception as e:
+            logger.error(f"edit_task: ошибка: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка редактирования", f"Произошла ошибка при сохранении:\n{str(e)}")
-            print(f"Error: {e}")
+        logger.debug("=== КОНЕЦ edit_task ===")
 
     def delete_task(self):
+        logger.debug("delete_task")
         item = self.tasks_list.currentItem()
-        if not item: return
-        if QMessageBox.question(self, "Удаление", "Удалить задание?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            database.delete_task(item.data(Qt.ItemDataRole.UserRole))
-            self.load_tasks()
-            self.task_title.setText("Название: -")
-            self.task_subject.setText("Предмет: -")
-            self.task_date.setText("Срок: -")
-            self.task_completed.setText("Выполнение: -")
-            self.task_status.setText("Архив: -")
-            self.task_desc.setText("-")
-            self.update_calendar_deadlines()
+        if not item:
+            logger.warning("delete_task: не выбран элемент")
+            return
+
+        try:
+            reply = QMessageBox.question(self, "Удаление", "Удалить задание?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                tid = item.data(Qt.ItemDataRole.UserRole)
+                database.delete_task(tid)
+                self.load_tasks()
+                self.task_title.setText("Название: -")
+                self.task_subject.setText("Предмет: -")
+                self.task_date.setText("Срок: -")
+                self.task_completed.setText("Выполнение: -")
+                self.task_status.setText("Архив: -")
+                self.task_desc.setText("-")
+                self.update_calendar_deadlines()
+                logger.info(f"delete_task: задача {tid} удалена")
+        except Exception as e:
+            logger.error(f"delete_task: ошибка: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при удалении:\n{str(e)}")
 
     def toggle_complete_task(self):
         logger.debug("toggle_complete_task вызван")
@@ -824,17 +1027,80 @@ class MainWindow(QMainWindow):
 
             database.toggle_task_completed(tid, new_completed)
 
+            # СОХРАНЯЕМ tid
+            saved_tid = tid
             self.load_tasks()
 
+            # Ищем по tid
             for i in range(self.tasks_list.count()):
                 new_item = self.tasks_list.item(i)
-                if new_item.data(Qt.ItemDataRole.UserRole) == tid:
+                if new_item.data(Qt.ItemDataRole.UserRole) == saved_tid:
                     self.tasks_list.setCurrentItem(new_item)
                     self.show_task_details(new_item)
                     break
             logger.debug("toggle_complete_task завершен")
         except Exception as e:
             logger.error(f"Ошибка в toggle_complete_task: {e}", exc_info=True)
+
+    def toggle_archive_task(self):
+        logger.debug("toggle_archive_task вызван")
+        try:
+            item = self.tasks_list.currentItem()
+            if not item:
+                logger.warning("Нет выбранного item")
+                return
+
+            tid = item.data(Qt.ItemDataRole.UserRole)
+            logger.debug(f"tid={tid}")
+
+            data = database.get_task_details(tid)
+            logger.debug(f"Данные: {data}")
+
+            if not data:
+                logger.warning("Нет данных")
+                return
+
+            current_status = data[5] if len(data) > 5 else 'active'
+            logger.debug(f"current_status={current_status}")
+
+            if current_status == 'archived':
+                logger.debug("Восстанавливаем из архива")
+                database.restore_task(tid)
+                QMessageBox.information(self, "Готово", "Задание восстановлено из архива")
+            else:
+                logger.debug("Архивируем")
+                database.archive_task(tid)
+                QMessageBox.information(self, "Готово", "Задание перемещено в архив")
+
+            logger.debug("Перезагружаем список")
+            # СОХРАНЯЕМ tid
+            saved_tid = tid
+            self.load_tasks()
+            self.update_calendar_deadlines()
+
+            logger.debug("Ищем элемент в обновленном списке")
+            found = False
+            for i in range(self.tasks_list.count()):
+                new_item = self.tasks_list.item(i)
+                if new_item.data(Qt.ItemDataRole.UserRole) == saved_tid:
+                    self.tasks_list.setCurrentItem(new_item)
+                    self.show_task_details(new_item)
+                    found = True
+                    break
+
+            if not found:
+                logger.debug("Элемент не найден в новом списке (возможно, фильтр скрыл его)")
+                self.task_title.setText("Название: -")
+                self.task_subject.setText("Предмет: -")
+                self.task_date.setText("Срок: -")
+                self.task_completed.setText("Выполнение: -")
+                self.task_status.setText("Архив: -")
+                self.task_desc.setText("-")
+
+            logger.debug("toggle_archive_task завершен")
+        except Exception as e:
+            logger.error(f"Ошибка в toggle_archive_task: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка: {str(e)}")
 
     def toggle_archive_task(self):
         logger.debug("toggle_archive_task вызван")
@@ -981,30 +1247,45 @@ class MainWindow(QMainWindow):
         self.notes_editor.setCurrentCharFormat(fmt)
 
     def open_file(self):
-        start_dir = self.storage_path if self.storage_path else os.path.expanduser("~")
-        filepath, _ = QFileDialog.getOpenFileName(self, "Открыть файл", start_dir,
-                                                  "Документы (*.docx *.txt);;Word (*.docx);;Текст (*.txt)")
-        if filepath:
-            self.load_file_content(filepath)
-            self.current_note_path = filepath
-            self.update_note_path_label()
+        logger.debug("open_file")
+        try:
+            start_dir = self.storage_path if self.storage_path else os.path.expanduser("~")
+            filepath, _ = QFileDialog.getOpenFileName(self, "Открыть файл", start_dir,
+                                                      "Документы (*.docx *.txt);;Word (*.docx);;Текст (*.txt)")
+            if filepath:
+                logger.info(f"open_file: открыт файл {filepath}")
+                self.load_file_content(filepath)
+                self.current_note_path = filepath
+                self.update_note_path_label()
+        except Exception as e:
+            logger.error(f"open_file: ошибка: {e}", exc_info=True)
 
     def save_file(self):
-        if self.current_note_path:
-            self.save_file_content(self.current_note_path)
-        else:
-            self.save_file_as()
+        logger.debug("save_file")
+        try:
+            if self.current_note_path:
+                self.save_file_content(self.current_note_path)
+            else:
+                self.save_file_as()
+        except Exception as e:
+            logger.error(f"save_file: ошибка: {e}", exc_info=True)
 
     def save_file_as(self):
-        start_dir = self.storage_path if self.storage_path else os.path.expanduser("~")
-        filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить файл", start_dir,
-                                                  "Word Documents (*.docx);;Text Files (*.txt)")
-        if filepath:
-            self.save_file_content(filepath)
-            self.current_note_path = filepath
-            self.update_note_path_label()
+        logger.debug("save_file_as")
+        try:
+            start_dir = self.storage_path if self.storage_path else os.path.expanduser("~")
+            filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить файл", start_dir,
+                                                      "Word Documents (*.docx);;Text Files (*.txt)")
+            if filepath:
+                logger.info(f"save_file_as: сохранение в {filepath}")
+                self.save_file_content(filepath)
+                self.current_note_path = filepath
+                self.update_note_path_label()
+        except Exception as e:
+            logger.error(f"save_file_as: ошибка: {e}", exc_info=True)
 
     def load_file_content(self, path):
+        logger.debug(f"load_file_content: {path}")
         try:
             if path.endswith('.docx'):
                 doc = Document(path)
@@ -1063,9 +1344,11 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "Ошибка", "Неподдерживаемый формат файла")
         except Exception as e:
+            logger.error(f"load_file_content: ошибка: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать файл:\n{e}")
 
     def save_file_content(self, path):
+        logger.debug(f"save_file_content: {path}")
         try:
             if path.endswith('.docx'):
                 doc = Document()
@@ -1121,6 +1404,7 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "Ошибка", "Неподдерживаемый формат для сохранения")
         except Exception as e:
+            logger.error(f"save_file_content: ошибка: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
 
 
