@@ -3,6 +3,7 @@ import sys
 import os
 import logging
 import database
+import notifications
 from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -279,6 +280,13 @@ class MainWindow(QMainWindow):
         self.load_tasks()
         self.update_calendar_deadlines()
         logger.info("=== ИНИЦИАЛИЗАЦИЯ ЗАВЕРШЕНА ===")
+
+        # Инициализация системы уведомлений
+        self.notification_manager = notifications.NotificationManager(self)
+        self.notification_manager.initialize()
+
+        # Добавляем пункт меню для уведомлений
+        self.setup_notifications_menu()
 
     def apply_theme(self, theme_name):
         app = QApplication.instance()
@@ -1406,6 +1414,41 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"save_file_content: ошибка: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
+
+
+
+    def setup_notifications_menu(self):
+        """Добавляет меню уведомлений"""
+        notif_menu = self.ui.menubar.addMenu("Уведомления")
+
+        check_action = notif_menu.addAction("Проверить дедлайны")
+        check_action.triggered.connect(self.notification_manager.manual_check)
+
+        notif_menu.addSeparator()
+
+        settings_action = notif_menu.addAction("Настройки уведомлений")
+        settings_action.triggered.connect(self.show_notification_settings)
+
+    def show_notification_settings(self):
+        """Показывает настройки уведомлений"""
+        QMessageBox.information(self, "Настройки уведомлений",
+            "Уведомления проверяются автоматически каждые 30 минут.\n"
+            "Срочные уведомления (сегодня/завтра) показываются в трее.\n"
+            "Используйте меню Уведомления → Проверить дедлайны для ручной проверки.")
+
+    def closeEvent(self, event):
+        """Обработка закрытия окна - сворачиваем в трей вместо закрытия"""
+        if self.notification_manager and self.notification_manager.tray_icon:
+            self.hide()
+            self.notification_manager.show_tray_message(
+                "Study Planner",
+                "Приложение свернуто в трей. Двойной клик по иконке для разворачивания."
+            )
+            event.ignore()
+        else:
+            if self.notification_manager:
+                self.notification_manager.cleanup()
+            event.accept()
 
 
 if __name__ == "__main__":
