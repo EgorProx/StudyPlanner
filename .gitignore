@@ -49,5 +49,8 @@ htmlcov/
 # Logs
 *.log
 
+# Database
+study_planner.db
+
 # Local data files (if needed)
 # data/
