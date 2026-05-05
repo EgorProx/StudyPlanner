@@ -3,49 +3,65 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
-        MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(1000, 700)
+        MainWindow.setObjectName('MainWindow')
+        MainWindow.resize(1200, 800)
         self.centralwidget = QtWidgets.QWidget(parent=MainWindow)
-        self.centralwidget.setObjectName("centralwidget")
+        self.centralwidget.setObjectName('centralwidget')
 
         self.mainLayout = QtWidgets.QHBoxLayout(self.centralwidget)
-        self.mainLayout.setObjectName("mainLayout")
+        self.mainLayout.setObjectName('mainLayout')
         self.mainLayout.setContentsMargins(0, 0, 0, 0)
         self.mainLayout.setSpacing(0)
 
         self.menuList = QtWidgets.QListWidget(parent=self.centralwidget)
-        self.menuList.setObjectName("menuList")
+        self.menuList.setObjectName('menuList')
         self.menuList.setMaximumWidth(200)
         self.mainLayout.addWidget(self.menuList)
 
         self.pagesStack = QtWidgets.QStackedWidget(parent=self.centralwidget)
-        self.pagesStack.setObjectName("pagesStack")
+        self.pagesStack.setObjectName('pagesStack')
         self.mainLayout.addWidget(self.pagesStack)
 
         self.page_subjects = QtWidgets.QWidget()
-        self.page_subjects.setObjectName("page_subjects")
+        self.page_subjects.setObjectName('page_subjects')
         self.pagesStack.addWidget(self.page_subjects)
 
+        self.page_schedule = QtWidgets.QWidget()
+        self.page_schedule.setObjectName('page_schedule')
+        self.pagesStack.addWidget(self.page_schedule)
+
         self.page_settings = QtWidgets.QWidget()
-        self.page_settings.setObjectName("page_settings")
+        self.page_settings.setObjectName('page_settings')
         self.pagesStack.addWidget(self.page_settings)
 
         self.page_calendar = QtWidgets.QWidget()
-        self.page_calendar.setObjectName("page_calendar")
+        self.page_calendar.setObjectName('page_calendar')
         self.pagesStack.addWidget(self.page_calendar)
 
         self.page_tasks = QtWidgets.QWidget()
-        self.page_tasks.setObjectName("page_tasks")
+        self.page_tasks.setObjectName('page_tasks')
         self.pagesStack.addWidget(self.page_tasks)
 
         self.page_notes = QtWidgets.QWidget()
-        self.page_notes.setObjectName("page_notes")
+        self.page_notes.setObjectName('page_notes')
         self.pagesStack.addWidget(self.page_notes)
+
+        self.page_grades = QtWidgets.QWidget()
+        self.page_grades.setObjectName('page_grades')
+        self.pagesStack.addWidget(self.page_grades)
+
+        self.page_ai = QtWidgets.QWidget()
+        self.page_ai.setObjectName('page_ai')
+        self.pagesStack.addWidget(self.page_ai)
+
+        self.page_wishlist = QtWidgets.QWidget()
+        self.page_wishlist.setObjectName('page_wishlist')
+        self.pagesStack.addWidget(self.page_wishlist)
 
         MainWindow.setCentralWidget(self.centralwidget)
 
         self.menubar = QtWidgets.QMenuBar(parent=MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 1000, 22))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 1200, 22))
         MainWindow.setMenuBar(self.menubar)
 
         self.statusbar = QtWidgets.QStatusBar(parent=MainWindow)
@@ -56,4 +72,4 @@ class Ui_MainWindow(object):
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "Study Planner"))
+        MainWindow.setWindowTitle(_translate('MainWindow', 'Study Planner'))
