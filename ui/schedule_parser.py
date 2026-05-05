@@ -1,130 +1,11 @@
-import sys
-import os
 import logging
 import re
 import urllib.request
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                             QPushButton, QComboBox, QLineEdit, QFormLayout,
-                             QMessageBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QGroupBox, QRadioButton, QButtonGroup,
-                             QSpinBox, QTextEdit)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QBrush
 import database
 
 logger = logging.getLogger(__name__)
-
-
-class ScheduleEntryDialog(QDialog):
-    def __init__(self, parent=None, subjects=None, entry_data=None):
-        super().__init__(parent)
-        self.setWindowTitle('Редактирование занятия' if entry_data else 'Новое занятие')
-        self.resize(400, 350)
-        self.entry_data = entry_data
-
-        layout = QVBoxLayout(self)
-        form = QFormLayout()
-
-        self.combo_subject = QComboBox()
-        self.subjects_map = {}
-        if subjects:
-            for sub in subjects:
-                self.combo_subject.addItem(sub[1], sub[0])
-                self.subjects_map[sub[1]] = sub[0]
-        form.addRow('Предмет:', self.combo_subject)
-
-        self.combo_day = QComboBox()
-        days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
-        for i, day in enumerate(days):
-            self.combo_day.addItem(day, i)
-        form.addRow('День недели:', self.combo_day)
-
-        week_group = QGroupBox('Тип недели')
-        week_layout = QHBoxLayout(week_group)
-        self.week_group = QButtonGroup(self)
-        self.radio_even = QRadioButton('Четная')
-        self.radio_odd = QRadioButton('Нечетная')
-        self.radio_both = QRadioButton('Каждую')
-        self.radio_both.setChecked(True)
-        self.week_group.addButton(self.radio_even)
-        self.week_group.addButton(self.radio_odd)
-        self.week_group.addButton(self.radio_both)
-        week_layout.addWidget(self.radio_even)
-        week_layout.addWidget(self.radio_odd)
-        week_layout.addWidget(self.radio_both)
-        form.addRow(week_group)
-
-        self.input_start = QLineEdit()
-        self.input_start.setPlaceholderText('09:00')
-        form.addRow('Начало:', self.input_start)
-
-        self.input_end = QLineEdit()
-        self.input_end.setPlaceholderText('10:30')
-        form.addRow('Конец:', self.input_end)
-
-        self.input_room = QLineEdit()
-        form.addRow('Аудитория:', self.input_room)
-
-        self.combo_type = QComboBox()
-        self.combo_type.addItems(['Лекция', 'Практика', 'Лабораторная', 'Семинар', 'Консультация', 'Экзамен', 'Зачет'])
-        form.addRow('Тип занятия:', self.combo_type)
-
-        self.input_group = QLineEdit()
-        form.addRow('Группа:', self.input_group)
-
-        layout.addLayout(form)
-
-        btn_layout = QHBoxLayout()
-        btn_ok = QPushButton('Сохранить')
-        btn_ok.clicked.connect(self.accept)
-        btn_cancel = QPushButton('Отмена')
-        btn_cancel.clicked.connect(self.reject)
-        btn_layout.addWidget(btn_ok)
-        btn_layout.addWidget(btn_cancel)
-        layout.addLayout(btn_layout)
-
-        if entry_data:
-            self.load_data(entry_data)
-
-    def load_data(self, data):
-        entry_id, subject_id, day_of_week, week_type, start_time, end_time, room, lesson_type, group_name, sub_name, teacher = data
-        index = self.combo_subject.findData(subject_id)
-        if index >= 0:
-            self.combo_subject.setCurrentIndex(index)
-        self.combo_day.setCurrentIndex(day_of_week)
-        if week_type == 'even':
-            self.radio_even.setChecked(True)
-        elif week_type == 'odd':
-            self.radio_odd.setChecked(True)
-        else:
-            self.radio_both.setChecked(True)
-        self.input_start.setText(start_time or '')
-        self.input_end.setText(end_time or '')
-        self.input_room.setText(room or '')
-        if lesson_type:
-            index = self.combo_type.findText(lesson_type)
-            if index >= 0:
-                self.combo_type.setCurrentIndex(index)
-        self.input_group.setText(group_name or '')
-
-    def get_data(self):
-        week_type = 'both'
-        if self.radio_even.isChecked():
-            week_type = 'even'
-        elif self.radio_odd.isChecked():
-            week_type = 'odd'
-        return {
-            'subject_id': self.combo_subject.currentData(),
-            'day_of_week': self.combo_day.currentIndex(),
-            'week_type': week_type,
-            'start_time': self.input_start.text(),
-            'end_time': self.input_end.text(),
-            'room': self.input_room.text(),
-            'lesson_type': self.combo_type.currentText(),
-            'group_name': self.input_group.text()
-        }
 
 
 class ScheduleParserBase:
@@ -288,26 +169,15 @@ class _SfuTimetableHTMLExtractor(HTMLParser):
 
 class SfuScheduleParser(ScheduleParserBase):
     DAY_MAP = {
-        'понедельник': 0,
-        'вторник': 1,
-        'среда': 2,
-        'четверг': 3,
-        'пятница': 4,
-        'суббота': 5,
-        'воскресенье': 6
+        'понедельник': 0, 'вторник': 1, 'среда': 2, 'четверг': 3,
+        'пятница': 4, 'суббота': 5, 'воскресенье': 6
     }
 
     LESSON_TYPE_MAP = {
-        'лекция': 'Лекция',
-        'пр. занятие': 'Практика',
-        'практика': 'Практика',
-        'лабораторная': 'Лабораторная',
-        'лаб. работа': 'Лабораторная',
-        'семинар': 'Семинар',
-        'консультация': 'Консультация',
-        'экзамен': 'Экзамен',
-        'зачет': 'Зачет',
-        'зачёт': 'Зачет'
+        'лекция': 'Лекция', 'пр. занятие': 'Практика', 'практика': 'Практика',
+        'лабораторная': 'Лабораторная', 'лаб. работа': 'Лабораторная',
+        'семинар': 'Семинар', 'консультация': 'Консультация',
+        'экзамен': 'Экзамен', 'зачет': 'Зачет', 'зачёт': 'Зачет'
     }
 
     def parse(self, source_data):
@@ -315,7 +185,6 @@ class SfuScheduleParser(ScheduleParserBase):
         extractor.feed(source_data)
         group_name = self._extract_group_name(source_data)
         entries = []
-
         for table in extractor.tables:
             current_day = None
             for row in table:
@@ -324,11 +193,9 @@ class SfuScheduleParser(ScheduleParserBase):
                     continue
                 if current_day is None or len(row) < 3:
                     continue
-
                 time_match = re.search(r'(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})', row[1].get('text', ''))
                 if not time_match:
                     continue
-
                 start_time, end_time = time_match.group(1), time_match.group(2)
                 lesson_cells = row[2:]
                 if lesson_cells[0].get('colspan') == 2 or len(lesson_cells) == 1:
@@ -336,12 +203,10 @@ class SfuScheduleParser(ScheduleParserBase):
                     if entry:
                         entries.append(entry)
                     continue
-
                 for week_type, cell in zip(('odd', 'even'), lesson_cells[:2]):
                     entry = self._parse_lesson_cell(cell, current_day, week_type, start_time, end_time, group_name)
                     if entry:
                         entries.append(entry)
-
         self.parsed_data = entries
         return entries
 
@@ -378,21 +243,14 @@ class SfuScheduleParser(ScheduleParserBase):
         text = cell.get('text', '').strip()
         if not text:
             return None
-
         subject_name = self._extract_subject_name(cell)
         if not subject_name:
             return None
-
         return {
-            'subject_name': subject_name,
-            'day_of_week': day_of_week,
-            'week_type': week_type,
-            'start_time': start_time,
-            'end_time': end_time,
-            'room': self._extract_room(text),
-            'lesson_type': self._extract_lesson_type(text),
-            'group_name': group_name,
-            'teacher': self._extract_teacher(cell)
+            'subject_name': subject_name, 'day_of_week': day_of_week, 'week_type': week_type,
+            'start_time': start_time, 'end_time': end_time,
+            'room': self._extract_room(text), 'lesson_type': self._extract_lesson_type(text),
+            'group_name': group_name, 'teacher': self._extract_teacher(cell)
         }
 
     def _extract_subject_name(self, cell):
@@ -432,7 +290,6 @@ class SfuScheduleParser(ScheduleParserBase):
 class WeekCalculator:
     @staticmethod
     def get_semester_start():
-        # Get semester start from settings, default to 2025-09-01
         from database import get_setting
         start_str = get_setting('semester_start', '2025-09-01')
         try:
@@ -444,20 +301,16 @@ class WeekCalculator:
     def get_week_type(date=None):
         if date is None:
             date = datetime.now()
-        # Convert to date object if needed
         if hasattr(date, 'date'):
             date_obj = date.date()
         else:
             date_obj = date
         semester_start = WeekCalculator.get_semester_start()
-        # Calculate days since semester start
         days_since = (date_obj - semester_start).days
         if days_since < 0:
-            # Before semester start, treat as even week (or could handle differently)
             week_number = 0
         else:
-            week_number = days_since // 7 + 1  # Week 1 is first 7 days
-        # Even week if week_number is even
+            week_number = days_since // 7 + 1
         return 'even' if week_number % 2 == 0 else 'odd'
 
     @staticmethod
